@@ -76,11 +76,22 @@ jobs:
           else
             echo "run=true" >> $GITHUB_OUTPUT
           fi
+
           # Never push on pull_request builds — build-only validation.
+          # Only refs/heads/main gets the production tags (latest + version);
+          # any other ref (e.g. workflow_dispatch on a test branch) gets a
+          # branch-scoped tag only, so a manual dispatch can never overwrite
+          # :latest / the version tag. See HOMELAB-91: radarr/sonarr/prowlarr
+          # hit this same trap without a tag_suffix.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "push=false" >> $GITHUB_OUTPUT
+            echo "channel=none" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "push=true" >> $GITHUB_OUTPUT
+            echo "channel=production" >> $GITHUB_OUTPUT
           else
             echo "push=true" >> $GITHUB_OUTPUT
+            echo "channel=test" >> $GITHUB_OUTPUT
           fi
 
       - name: Log in to GitHub Container Registry
@@ -98,9 +109,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ steps.gate.outputs.push == 'true' }}
-            type=raw,value=${{ steps.ttyd_version.outputs.version }},enable=${{ steps.gate.outputs.push == 'true' }}
-            type=raw,value=pr-${{ github.event.number }},enable=${{ steps.gate.outputs.push != 'true' }}
+            type=raw,value=latest,enable=${{ steps.gate.outputs.channel == 'production' }}
+            type=raw,value=${{ steps.ttyd_version.outputs.version }},enable=${{ steps.gate.outputs.channel == 'production' }}
+            type=raw,value=branch-${{ github.ref_name }},enable=${{ steps.gate.outputs.channel == 'test' }}
+            type=raw,value=pr-${{ github.event.number }},enable=${{ steps.gate.outputs.channel == 'none' }}
           labels: |
             org.opencontainers.image.base.digest=${{ steps.base_digest.outputs.digest }}
 
